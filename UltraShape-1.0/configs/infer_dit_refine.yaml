@@ -1,0 +1,71 @@
+model:
+  target: ultrashape.pipelines.UltraShapePipeline
+  params:
+    # 1. VAE Config
+    vae_config:
+      target: ultrashape.models.autoencoders.ShapeVAE
+      params:
+        num_latents: &token_num 32768 # infer token_num
+        embed_dim: 64
+        num_freqs: 8
+        include_pi: false
+        heads: 16
+        width: 1024
+        point_feats: 4
+        num_encoder_layers: 8
+        num_decoder_layers: 16
+        pc_size: 409600 # num_s (204800) + num_u (204800)
+        pc_sharpedge_size: 0
+        downsample_ratio: 20
+        qkv_bias: false
+        qk_norm: true
+        scale_factor: 1.0039506158752403
+        geo_decoder_mlp_expand_ratio: 4
+        # geo_decoder_downsample_ratio: 1
+        geo_decoder_ln_post: true
+        enable_flashvdm: true
+        jitter_query: false
+        voxel_query: true
+        voxel_query_res: 128
+      
+    # 2. DiT Denoiser Config
+    dit_cfg:
+      target: ultrashape.models.denoisers.dit_mask.RefineDiT
+      params:
+        input_size: *token_num
+        in_channels: 64
+        hidden_size: 2048
+        context_dim: 1024
+        depth: 21
+        num_heads: 16
+        qk_norm: true
+        text_len: 1370
+        qk_norm_type: 'rms'
+        qkv_bias: false
+        num_moe_layers: 6
+        num_experts: 8
+        moe_top_k: 2
+
+    # 3. Image Encoder Config
+    conditioner_config:
+      target: ultrashape.models.conditioner_mask.SingleImageEncoder
+      params:
+        drop_ratio: 0.0
+        main_image_encoder:
+            type: DinoImageEncoder 
+            kwargs:
+                version: 'facebook/dinov2-large' 
+                image_size: 1022
+                use_cls_token: true
+        
+    # 4. Scheduler Config
+    scheduler_cfg:
+      target: ultrashape.schedulers.FlowMatchEulerDiscreteScheduler
+      params:
+        num_train_timesteps: 1000
+
+    # 5. Image Processor
+    image_processor_cfg:
+      target: ultrashape.preprocessors.ImageProcessorV2
+      params: 
+        size: 1024

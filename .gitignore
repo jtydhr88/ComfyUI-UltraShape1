@@ -1,0 +1,32 @@
+# Dependencies
+node_modules/
+
+# JS build output is committed for distribution
+# js/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# TypeScript cache
+*.tsbuildinfo
+
+__init__.cpython-311.pyc
+
+__pycache__
+
+HY-Motion-1.0

@@ -1,0 +1,89 @@
+name: "UltraShape Refine VAE"
+
+training:
+  # ckpt_path: 
+  steps: 10_0000_0000
+  use_amp: true
+  amp_type: "bf16"
+  base_lr: 1e-5
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: "norm"
+  every_n_train_steps: 2500
+  val_check_interval: 1000
+  limit_val_batches: 16
+
+dataset:
+  target: ultrashape.data.objaverse_vae.ObjaverseDataModule
+  params:
+    batch_size: 4
+    num_workers: 4
+    val_num_workers: 4
+
+    # data 
+    training_data_list: data/data_list
+    sample_pcd_dir: data/sample
+
+    # input_pcd
+    pc_size: &pc_size 163840
+    pc_sharpedge_size: &pc_sharpedge_size 0
+    sharpedge_label: &sharpedge_label true
+    return_normal: true
+
+    # sup_pcd
+    sup_near_uni_size: 100000
+    sup_near_sharp_size: 100000
+    sup_space_size: 100000
+    tsdf_threshold: 0.01
+
+model:
+  target: ultrashape.models.autoencoders.VAETrainer
+  params:
+    ckpt_path: ckpt/vae_step=15000.ckpt
+    torch_compile: false
+    save_dir: outputs/vae_recon
+    mc_res: 512
+    vae_config:
+      target: ultrashape.models.autoencoders.ShapeVAE
+      params:
+        num_latents: &num_latents 8192 # 4096
+        embed_dim: 64
+        num_freqs: 8
+        include_pi: false
+        heads: 16
+        width: 1024
+        point_feats: 4
+        num_encoder_layers: 8
+        num_decoder_layers: 16
+        pc_size: *pc_size
+        pc_sharpedge_size: *pc_sharpedge_size
+        downsample_ratio: 20
+        qkv_bias: false
+        qk_norm: true
+        geo_decoder_mlp_expand_ratio: 4
+        geo_decoder_downsample_ratio: 1
+        geo_decoder_ln_post: true
+        enable_flashvdm: true
+        jitter_query: true
+
+    optimizer_cfg:
+      optimizer:
+        target: torch.optim.AdamW
+        params:
+          betas: [0.9, 0.99]
+          eps: 1.e-6
+          weight_decay: 1.e-2
+
+      scheduler:
+        target: ultrashape.utils.trainings.lr_scheduler.LambdaWarmUpCosineFactorScheduler
+        params:
+          warm_up_steps: 500 # 5000
+          f_start: 1.e-6
+          f_min: 1.e-3
+          f_max: 1.0
+        
+    loss_cfg:
+      lambda_logits: 1.
+      lambda_kl: 0.001
+      # lambda_eik: -1.
+      # lambda_sn: -1.
+      # lambda_sign: -1.

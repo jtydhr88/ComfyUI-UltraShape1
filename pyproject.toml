@@ -1,0 +1,23 @@
+[project]
+name = "Comfyui-UltraShape1"
+version = "0.1.0"
+description = "ComfyUI custom nodes for UltraShape - Image-guided 3D mesh refinement"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.10"
+dependencies = [
+    "trimesh>=4.0.0",
+    "omegaconf>=2.3.0",
+    "einops>=0.8.0",
+]
+
+[project.optional-dependencies]
+rembg = ["rembg"]
+
+[project.urls]
+Repository = "https://github.com/jtydhr88/ComfyUI-UltraShape1"
+
+[tool.comfy]
+PublisherId = "jtydhr88"
+DisplayName = "Comfyui UltraShape1"
+Icon = ""

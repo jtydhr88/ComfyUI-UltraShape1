@@ -1,0 +1,138 @@
+name: "UltraShape Refine DiT"
+
+training:
+  # ckpt_path:
+  steps: 10_0000_0000
+  use_amp: true
+  amp_type: "bf16"
+  base_lr: 1e-5
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: "norm"
+  every_n_train_steps: 2500
+  val_check_interval: 1000
+  limit_val_batches: 16
+  accumulate_grad_batches: 4
+
+dataset:
+  target: ultrashape.data.objaverse_dit.ObjaverseDataModule
+  params:
+    batch_size: 1
+    num_workers: 4
+    val_num_workers: 4
+
+    # data
+    training_data_list: data/data_list
+    sample_pcd_dir: data/sample
+    image_data_json: data/render.json
+
+    # image
+    image_size: &image_size 1022  # 518
+    mean: &mean [0.5, 0.5, 0.5]
+    std: &std [0.5, 0.5, 0.5]
+    padding: true
+
+    # input_pcd
+    pc_size: &pc_size 163840
+    pc_sharpedge_size: &pc_sharpedge_size 0
+    sharpedge_label: &sharpedge_label true
+    return_normal: true
+
+model:
+  target: ultrashape.models.diffusion.flow_matching_dit_trainer.Diffuser
+  params:
+    ckpt_path: ckpt/dit_step=XXX.ckpt
+    scale_by_std: false
+    z_scale_factor: &z_scale_factor 1.0039506158752403
+    torch_compile: false
+
+    vae_config:
+      target: ultrashape.models.autoencoders.ShapeVAE
+      from_pretrained: ckpt/vae_step=XXX.ckpt
+      params:
+        num_latents: &num_latents 8192  # 4096
+        embed_dim: 64
+        num_freqs: 8
+        include_pi: false
+        heads: 16
+        width: 1024
+        point_feats: 4
+        num_encoder_layers: 8
+        num_decoder_layers: 16
+        pc_size: *pc_size
+        pc_sharpedge_size: *pc_sharpedge_size
+        downsample_ratio: 20
+        qkv_bias: false
+        qk_norm: true
+        scale_factor: *z_scale_factor
+        geo_decoder_mlp_expand_ratio: 4
+        geo_decoder_downsample_ratio: 1
+        geo_decoder_ln_post: true
+        enable_flashvdm: true
+        jitter_query: false
+        voxel_query: true
+        voxel_query_res: 128
+
+    cond_config:
+      target: ultrashape.models.conditioner_mask.SingleImageEncoder
+      params:
+        drop_ratio: 0.1
+        # disable_drop: false
+        main_image_encoder:
+            type: DinoImageEncoder 
+            kwargs:
+                version: 'facebook/dinov2-large'
+                image_size: *image_size
+                use_cls_token: true
+
+    dit_cfg:
+      target: ultrashape.models.denoisers.dit_mask.RefineDiT
+      params:
+        input_size: *num_latents
+        in_channels: 64
+        hidden_size: 2048
+        context_dim: 1024
+        depth: 21
+        num_heads: 16
+        qk_norm: true
+        text_len: 5330  # 1370
+        qk_norm_type: 'rms'
+        qkv_bias: false
+        num_moe_layers: 6
+        num_experts: 8
+        moe_top_k: 2
+        
+    scheduler_cfg:
+      transport:
+        target: ultrashape.models.diffusion.transport.create_transport
+        params:
+          path_type: Linear
+          prediction: velocity
+      sampler:
+        target: ultrashape.models.diffusion.transport.Sampler
+        params: {}
+        ode_params:
+          sampling_method: euler
+          num_steps: &num_steps 50
+
+    optimizer_cfg:
+      optimizer:
+        target: torch.optim.AdamW
+        params:
+          betas: [0.9, 0.99]
+          eps: 1.e-6
+          weight_decay: 1.e-2
+
+      scheduler:
+        target: ultrashape.utils.trainings.lr_scheduler.LambdaWarmUpCosineFactorScheduler
+        params:
+          warm_up_steps: 500 # 5000
+          f_start: 1.e-6
+          f_min: 1.e-3
+          f_max: 1.0
+
+    pipeline_cfg:
+      target: ultrashape.pipelines.UltraShapePipeline
+
+    image_processor_cfg:
+      target: ultrashape.preprocessors.ImageProcessorV2
+      params: {}
