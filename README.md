@@ -27,10 +27,10 @@ Place model weights in ComfyUI's models directory:
 ComfyUI/
 └── models/
     └── UltraShape/
-        └── ultrashape_refine.pt    # or other checkpoint name
+        └── ultrashape_v1.pt
 ```
 
-Download from the official UltraShape repository or HuggingFace.
+Download from the HuggingFace https://huggingface.co/infinith/UltraShape/tree/main.
 
 ### 3. Prepare Input Files
 
