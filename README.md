@@ -189,21 +189,6 @@ Save refined mesh to file.
 - Ensure the file exists and has a supported extension
 - Try using UltraShape Mesh Selector for file upload
 
-## Changelog
-
-### v1.1.0
-- Added `low_vram` parameter for reduced memory usage
-- Added `num_latents` parameter for configurable detail level
-- Added `num_chunks` parameter for chunk-based processing
-- Added **UltraShape Mesh Selector** node for file upload
-- Refactored mesh loading with flexible path resolution
-- Merged performance optimizations from upstream UltraShape
-- Fixed device mismatch issues with CUDA generators
-- Improved memory management with chunk processing
-
-### v1.0.0
-- Initial release
-
 ## License
 
 Please refer to the UltraShape 1.0 original project license.
