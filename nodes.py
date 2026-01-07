@@ -330,7 +330,7 @@ class UltraShapeRefine:
             "optional": {
                 "steps": ("INT", {"default": 50, "min": 10, "max": 200, "step": 5}),
                 "guidance_scale": ("FLOAT", {"default": 5.0, "min": 1.0, "max": 15.0, "step": 0.5}),
-                "octree_resolution": ("INT", {"default": 384, "min": 256, "max": 1024, "step": 64,
+                "octree_resolution": ("INT", {"default": 384, "min": 256, "max": 2048, "step": 64,
                     "tooltip": "Mesh resolution. Higher=better quality but more VRAM. 384=~8GB, 512=~16GB, 1024=~48GB+"}),
                 "num_chunks": ("INT", {"default": 8000, "min": 1000, "max": 50000, "step": 1000,
                     "tooltip": "Chunk size for volume decoding. Lower=less VRAM but slower. Default 8000 works for most GPUs"}),

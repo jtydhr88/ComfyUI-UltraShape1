@@ -11,5 +11,7 @@ pymeshlab
 # Optional: Background removal (can use ComfyUI's built-in if available)
 rembg
 
+diffusers
+pytorch-lightning
 # Mesh processing (may be required for some features)
 # diso>=0.1.4
