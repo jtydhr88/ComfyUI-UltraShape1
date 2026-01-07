@@ -33,103 +33,84 @@ from .attention_processors import FlashVDMCrossAttentionProcessor, FlashVDMTopMC
 from ...utils import logger
 
 
-def dilate_3d_sliced(tensor: torch.Tensor, dilate_kernel: nn.Conv3d, slice_size: int = 64) -> torch.Tensor:
-    """
-    Apply 3D dilation to a large tensor by processing it in z-axis slices.
-    This reduces memory usage for high-resolution volumes.
-    """
-    device = tensor.device
-    # Get kernel dtype
-    kernel_dtype = next(dilate_kernel.parameters()).dtype
-    output_dtype = tensor.dtype if not torch.is_floating_point(tensor) else tensor.dtype
-
-    if tensor.shape[0] <= slice_size:
-        # Small enough to process directly
-        result = dilate_kernel(tensor.unsqueeze(0).to(kernel_dtype)).squeeze(0)
-        return result.to(output_dtype)
-
-    slices = []
-    for z_start in range(0, tensor.shape[0], slice_size):
-        z_end = min(z_start + slice_size, tensor.shape[0])
-
-        # Add overlap to handle boundary artifacts from the convolution
-        z_start_with_pad = max(0, z_start - 1)
-        z_end_with_pad = min(tensor.shape[0], z_end + 1)
-
-        # Extract slice with overlap and convert to kernel dtype
-        slice_data = tensor[z_start_with_pad:z_end_with_pad].unsqueeze(0).to(kernel_dtype)
-        dilated_slice = dilate_kernel(slice_data).squeeze(0)
-
-        # Convert back to original dtype if needed
-        if output_dtype != kernel_dtype:
-            dilated_slice = dilated_slice.to(output_dtype)
-
-        # Remove the overlapping regions from the output
-        overlap_start = z_start - z_start_with_pad
-        overlap_end = overlap_start + (z_end - z_start)
-        slices.append(dilated_slice[overlap_start:overlap_end])
-
-        torch.cuda.empty_cache()
-
-    return torch.cat(slices, dim=0)
-
-
 def extract_near_surface_volume_fn(input_tensor: torch.Tensor, alpha: float):
+    device = input_tensor.device
     D = input_tensor.shape[0]
+    signed_val = 0.0
 
     val = input_tensor + alpha
-    valid_mask = val > -9000
+    valid_mask = val > -9000  
 
-    mask = torch.ones_like(val, dtype=torch.int32)
-    sign = torch.sign(val.to(torch.float32))
-
-    # Helper to compute neighbor for a single direction
-    def check_neighbor_sign(shift, axis):
+    def get_neighbor(t, shift, axis):
+        """根据指定轴进行位移并保持维度一致"""
         if shift == 0:
-            return
+            return t.clone()
 
-        pad_dims = [0, 0, 0, 0, 0, 0]
-        if axis == 0:
+        pad_dims = [0, 0, 0, 0, 0, 0]  
+
+        if axis == 0: 
             pad_idx = 0 if shift > 0 else 1
             pad_dims[pad_idx] = abs(shift)
-        elif axis == 1:
+        elif axis == 1: 
             pad_idx = 2 if shift > 0 else 3
             pad_dims[pad_idx] = abs(shift)
-        elif axis == 2:
+        elif axis == 2: 
             pad_idx = 4 if shift > 0 else 5
             pad_dims[pad_idx] = abs(shift)
 
-        padded = F.pad(val.unsqueeze(0).unsqueeze(0), pad_dims[::-1], mode='replicate')
+        padded = F.pad(t.unsqueeze(0).unsqueeze(0), pad_dims[::-1], mode='replicate')  # 反转顺序适配F.pad
 
-        slice_dims = [slice(None)] * 3
-        if axis == 0:
-            if shift > 0: slice_dims[0] = slice(shift, None)
-            else: slice_dims[0] = slice(None, shift)
-        elif axis == 1:
-            if shift > 0: slice_dims[1] = slice(shift, None)
-            else: slice_dims[1] = slice(None, shift)
-        elif axis == 2:
-            if shift > 0: slice_dims[2] = slice(shift, None)
-            else: slice_dims[2] = slice(None, shift)
+        slice_dims = [slice(None)] * 3  
+        if axis == 0:  
+            if shift > 0:
+                slice_dims[0] = slice(shift, None)
+            else:
+                slice_dims[0] = slice(None, shift)
+        elif axis == 1: 
+            if shift > 0:
+                slice_dims[1] = slice(shift, None)
+            else:
+                slice_dims[1] = slice(None, shift)
+        elif axis == 2: 
+            if shift > 0:
+                slice_dims[2] = slice(shift, None)
+            else:
+                slice_dims[2] = slice(None, shift)
 
         padded = padded.squeeze(0).squeeze(0)
-        neighbor = padded[tuple(slice_dims)]
-        neighbor = torch.where(neighbor > -9000, neighbor, val)
+        sliced = padded[slice_dims]
+        return sliced
 
-        # Check sign consistency
-        neighbor_sign = torch.sign(neighbor.to(torch.float32))
-        return (neighbor_sign == sign)
+    left = get_neighbor(val, 1, axis=0) 
+    right = get_neighbor(val, -1, axis=0)
+    back = get_neighbor(val, 1, axis=1) 
+    front = get_neighbor(val, -1, axis=1)
+    down = get_neighbor(val, 1, axis=2)  
+    up = get_neighbor(val, -1, axis=2)
 
-    # Iteratively check neighbors and update mask
-    # directions: (shift, axis)
-    directions = [(1, 0), (-1, 0), (1, 1), (-1, 1), (1, 2), (-1, 2)]
+    def safe_where(neighbor):
+        return torch.where(neighbor > -9000, neighbor, val)
 
-    for shift, axis in directions:
-        is_same = check_neighbor_sign(shift, axis)
-        mask = mask & is_same.to(torch.int32)
+    left = safe_where(left)
+    right = safe_where(right)
+    back = safe_where(back)
+    front = safe_where(front)
+    down = safe_where(down)
+    up = safe_where(up)
 
-    # Invert mask: we want 1 where ANY neighbor has different sign
-    mask = (~(mask.bool())).to(torch.int32)
+    sign = torch.sign(val.to(torch.float32))
+    neighbors_sign = torch.stack([
+        torch.sign(left.to(torch.float32)),
+        torch.sign(right.to(torch.float32)),
+        torch.sign(back.to(torch.float32)),
+        torch.sign(front.to(torch.float32)),
+        torch.sign(down.to(torch.float32)),
+        torch.sign(up.to(torch.float32))
+    ], dim=0)
+
+    same_sign = torch.all(neighbors_sign == sign, dim=0)
+
+    mask = (~same_sign).to(torch.int32)
     return mask * valid_mask.to(torch.int32)
 
 
@@ -212,7 +193,6 @@ class HierarchicalVolumeDecoding:
     ):
         device = latents.device
         dtype = latents.dtype
-        z_slice_size = kwargs.pop('z_slice_size', 64)
 
         resolutions = []
         if octree_resolution < min_resolution:
@@ -267,22 +247,12 @@ class HierarchicalVolumeDecoding:
             else:
                 expand_num = 1
             for i in range(expand_num):
-                curr_points = dilate_3d_sliced(curr_points, dilate, z_slice_size)
+                curr_points = dilate(curr_points.unsqueeze(0).to(dtype)).squeeze(0)
             (cidx_x, cidx_y, cidx_z) = torch.where(curr_points > 0)
             next_index[cidx_x * 2, cidx_y * 2, cidx_z * 2] = 1
-
-            # Clear memory before dilation operations
-            del curr_points
-            torch.cuda.empty_cache()
-
             for i in range(2 - expand_num):
-                next_index = dilate_3d_sliced(next_index, dilate, z_slice_size)
+                next_index = dilate(next_index.unsqueeze(0)).squeeze(0)
             nidx = torch.where(next_index > 0)
-
-            # Store shape before deleting
-            next_index_shape = next_index.shape
-            del next_index
-            torch.cuda.empty_cache()
 
             next_points = torch.stack(nidx, dim=1)
             next_points = (next_points * torch.tensor(resolution, dtype=next_points.dtype, device=device) +
@@ -294,9 +264,6 @@ class HierarchicalVolumeDecoding:
                 batch_queries = repeat(queries, "p c -> b p c", b=batch_size)
                 logits = geo_decoder(queries=batch_queries.to(latents.dtype), latents=latents)
                 batch_logits.append(logits)
-
-            # Delayed allocation of next_logits
-            next_logits = torch.full(next_index_shape, -10000., dtype=dtype, device=device)
             grid_logits = torch.cat(batch_logits, dim=1)
             next_logits[nidx] = grid_logits[0, ..., 0]
             grid_logits = next_logits.unsqueeze(0)
@@ -334,7 +301,6 @@ class FlashVDMVolumeDecoding:
 
         device = latents.device
         dtype = latents.dtype
-        z_slice_size = kwargs.pop('z_slice_size', 64)
 
         resolutions = []
         if octree_resolution < min_resolution:
@@ -389,19 +355,7 @@ class FlashVDMVolumeDecoding:
             batch = queries.shape[0]
             batch_latents = repeat(latents.squeeze(0), "p c -> b p c", b=batch)
             processor.topk = True
-
-            # Chunk queries along dim 1 if too large
-            if queries.shape[1] > num_chunks:
-                # print(f"Chunking queries: {queries.shape} with chunk size {num_chunks}")
-                batch_logits_sub = []
-                for sub_start in range(0, queries.shape[1], num_chunks):
-                    sub_queries = queries[:, sub_start: sub_start + num_chunks, :]
-                    logits = geo_decoder(queries=sub_queries, latents=batch_latents)
-                    batch_logits_sub.append(logits)
-                logits = torch.cat(batch_logits_sub, dim=1)
-            else:
-                logits = geo_decoder(queries=queries, latents=batch_latents)
-
+            logits = geo_decoder(queries=queries, latents=batch_latents)
             batch_logits.append(logits)
         grid_logits = torch.cat(batch_logits, dim=0).reshape(
             mini_grid_num, mini_grid_num, mini_grid_num,
@@ -424,24 +378,14 @@ class FlashVDMVolumeDecoding:
             else:
                 expand_num = 1
             for i in range(expand_num):
-                curr_points = dilate_3d_sliced(curr_points, dilate, z_slice_size)
-                curr_points = dilate_3d_sliced(curr_points, dilate, z_slice_size)
+                curr_points = dilate(curr_points.unsqueeze(0).to(dtype)).squeeze(0)
+                curr_points = dilate(curr_points.unsqueeze(0).to(dtype)).squeeze(0)
             (cidx_x, cidx_y, cidx_z) = torch.where(curr_points > 0)
 
             next_index[cidx_x * 2, cidx_y * 2, cidx_z * 2] = 1
-
-            # Clear memory before dilation operations
-            del curr_points
-            torch.cuda.empty_cache()
-
             for i in range(2 - expand_num):
-                next_index = dilate_3d_sliced(next_index, dilate, z_slice_size)
+                next_index = dilate(next_index.unsqueeze(0)).squeeze(0)
             nidx = torch.where(next_index > 0)
-
-            # Store shape before deleting
-            next_index_shape = next_index.shape
-            del next_index
-            torch.cuda.empty_cache()
 
             next_points = torch.stack(nidx, dim=1)
             next_points = (next_points * torch.tensor(resolution, dtype=torch.float32, device=device) +
@@ -462,33 +406,23 @@ class FlashVDMVolumeDecoding:
             start_num = 0
             sum_num = 0
             for grid_index, count in zip(unique_values[0].cpu().tolist(), unique_values[1].cpu().tolist()):
-                remaining_count = count
-                while remaining_count > 0:
-                    space_left = num_chunks - sum_num
-                    # If buffer is full, flush it
-                    if space_left <= 0:
-                        processor.topk = input_grid
-                        logits_grid = geo_decoder(queries=next_points[:, start_num:start_num + sum_num], latents=latents)
-                        start_num = start_num + sum_num
-                        logits_grid_list.append(logits_grid)
-                        input_grid = [[], []]
-                        sum_num = 0
-                        space_left = num_chunks
-
-                    take = min(remaining_count, space_left)
+                if sum_num + count < num_chunks or sum_num == 0:
+                    sum_num += count
                     input_grid[0].append(grid_index)
-                    input_grid[1].append(take)
-                    sum_num += take
-                    remaining_count -= take
+                    input_grid[1].append(count)
+                else:
+                    processor.topk = input_grid
+                    logits_grid = geo_decoder(queries=next_points[:, start_num:start_num + sum_num], latents=latents)
+                    start_num = start_num + sum_num
+                    logits_grid_list.append(logits_grid)
+                    input_grid = [[grid_index], [count]]
+                    sum_num = count
             if sum_num > 0:
                 processor.topk = input_grid
                 logits_grid = geo_decoder(queries=next_points[:, start_num:start_num + sum_num], latents=latents)
                 logits_grid_list.append(logits_grid)
             logits_grid = torch.cat(logits_grid_list, dim=1)
             grid_logits[index.indices] = logits_grid.squeeze(0).squeeze(-1)
-
-            # Delayed allocation of next_logits
-            next_logits = torch.full(next_index_shape, -10000., dtype=dtype, device=device)
             next_logits[nidx] = grid_logits
             grid_logits = next_logits.unsqueeze(0)
 

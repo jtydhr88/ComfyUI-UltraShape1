@@ -357,10 +357,6 @@ class UltraShapeRefine:
                 "box_v": ("FLOAT", {"default": 1.0, "min": 0.5, "max": 2.0, "step": 0.1}),
                 "seed": ("INT", {"default": 42, "min": 0, "max": 0x7fffffff}),
                 "remove_bg": ("BOOLEAN", {"default": False}),
-                "num_chunks": ("INT", {"default": 20000, "min": 1000, "max": 50000, "step": 1000,
-                    "tooltip": "Query batch size for volume decoding. Lower=less VRAM but slower. Default 10000 is optimal balance."}),
-                "z_slice_size": ("INT", {"default": 128, "min": 32, "max": 512, "step": 32,
-                    "tooltip": "Z-axis slice size for dilation ops. Lower=less VRAM but slower. 64 is balanced, 32 for tight VRAM, 128+ for fast high-VRAM GPUs."}),
             }
         }
 
@@ -371,7 +367,7 @@ class UltraShapeRefine:
 
     def refine(self, model: UltraShapeModelWrapper, coarse_mesh: UltraShapeMeshWrapper,
                image, steps=50, guidance_scale=5.0, octree_resolution=1024,
-               mc_level=0.0, box_v=1.0, seed=42, remove_bg=False, num_chunks=10000, z_slice_size=64):
+               mc_level=0.0, box_v=1.0, seed=42, remove_bg=False):
         import comfy.utils
 
         # Convert ComfyUI image to PIL
@@ -393,7 +389,7 @@ class UltraShapeRefine:
         if pil_image.mode != 'RGBA':
             pil_image = pil_image.convert('RGBA')
 
-        print(f"[UltraShape] Refining mesh: steps={steps}, guidance={guidance_scale}, octree_res={octree_resolution}, num_chunks={num_chunks}, z_slice_size={z_slice_size}")
+        print(f"[UltraShape] Refining mesh: steps={steps}, guidance={guidance_scale}, octree_res={octree_resolution}")
 
         # Setup generator for reproducibility
         generator = torch.Generator(device=model.device).manual_seed(seed)
@@ -417,8 +413,6 @@ class UltraShapeRefine:
                 octree_resolution=octree_resolution,
                 num_inference_steps=steps,
                 guidance_scale=guidance_scale,
-                num_chunks=num_chunks,
-                z_slice_size=z_slice_size,
                 callback=callback,
                 callback_steps=1,
             )
