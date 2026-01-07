@@ -1,0 +1,453 @@
+{
+  "id": "25224420-e87c-471a-a3fb-0b76d9646dea",
+  "revision": 0,
+  "last_node_id": 8,
+  "last_link_id": 8,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "UltraShapeLoadModel",
+      "pos": [
+        -5504.542668621205,
+        -3622.6819708624885
+      ],
+      "size": [
+        270,
+        130
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "ULTRASHAPE_MODEL",
+          "links": [
+            1,
+            3
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UltraShapeLoadModel"
+      },
+      "widgets_values": [
+        "ultrashape_v1.pt",
+        "infer_dit_refine.yaml",
+        "bfloat16",
+        true
+      ]
+    },
+    {
+      "id": 3,
+      "type": "UltraShapeLoadCoarseMesh",
+      "pos": [
+        -5202.732309000227,
+        -3345.20703295519
+      ],
+      "size": [
+        302.093359375,
+        154
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "ULTRASHAPE_MODEL",
+          "link": 3
+        },
+        {
+          "name": "mesh_path",
+          "type": "STRING",
+          "widget": {
+            "name": "mesh_path"
+          },
+          "link": 8
+        }
+      ],
+      "outputs": [
+        {
+          "name": "coarse_mesh",
+          "type": "ULTRASHAPE_MESH",
+          "links": [
+            2
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UltraShapeLoadCoarseMesh"
+      },
+      "widgets_values": [
+        "",
+        0.99,
+        204800,
+        204800,
+        0
+      ]
+    },
+    {
+      "id": 2,
+      "type": "UltraShapeRefine",
+      "pos": [
+        -4751.055345311317,
+        -3503.7346530301197
+      ],
+      "size": [
+        270,
+        290
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "ULTRASHAPE_MODEL",
+          "link": 1
+        },
+        {
+          "name": "coarse_mesh",
+          "type": "ULTRASHAPE_MESH",
+          "link": 2
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "refined_mesh",
+          "type": "ULTRASHAPE_OUTPUT",
+          "links": [
+            4
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UltraShapeRefine"
+      },
+      "widgets_values": [
+        10,
+        5,
+        384,
+        8000,
+        0,
+        1,
+        553456601,
+        "randomize",
+        false
+      ]
+    },
+    {
+      "id": 4,
+      "type": "UltraShapeSaveGLB",
+      "pos": [
+        -4421.05384060705,
+        -3448.600619266922
+      ],
+      "size": [
+        274.175390625,
+        106
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "refined_mesh",
+          "type": "ULTRASHAPE_OUTPUT",
+          "link": 4
+        }
+      ],
+      "outputs": [
+        {
+          "name": "file_path",
+          "type": "STRING",
+          "links": [
+            6
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UltraShapeSaveGLB"
+      },
+      "widgets_values": [
+        "ultrashape_output",
+        "refined",
+        "glb"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "Load3D",
+      "pos": [
+        -5759.391217750943,
+        -3319.1964356279987
+      ],
+      "size": [
+        418.40018066406265,
+        565.4398242187494
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "links": null
+        },
+        {
+          "name": "mesh_path",
+          "type": "STRING",
+          "links": [
+            8
+          ]
+        },
+        {
+          "name": "normal",
+          "type": "IMAGE",
+          "links": null
+        },
+        {
+          "name": "camera_info",
+          "type": "LOAD3D_CAMERA",
+          "links": null
+        },
+        {
+          "name": "recording_video",
+          "type": "VIDEO",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Resource Folder": "",
+        "Node name for S&R": "Load3D",
+        "Camera Config": {
+          "cameraType": "perspective",
+          "fov": 35,
+          "state": {
+            "position": {
+              "x": 1.020403119763784,
+              "y": 2.270040435533369,
+              "z": 3.78175823780053
+            },
+            "target": {
+              "x": 0.03494070510339202,
+              "y": 2.603124316461798,
+              "z": -0.0003410229071787377
+            },
+            "zoom": 1,
+            "cameraType": "perspective"
+          }
+        }
+      },
+      "widgets_values": [
+        "3d/ComfyUI_00072_.glb",
+        "upload3dmodel",
+        "uploadExtraResources",
+        "clear",
+        "",
+        1024,
+        1024
+      ]
+    },
+    {
+      "id": 7,
+      "type": "LoadImage",
+      "pos": [
+        -5101.895537428385,
+        -3080.2407666032527
+      ],
+      "size": [
+        282.798828125,
+        314
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            7
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "cdf996a6cc218918eeb90209891ce306a230e6d9cca2a3d9bbb37c6d7b6bd318.webp",
+        "image"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "Preview3D",
+      "pos": [
+        -4106.179314979977,
+        -3334.8395519053583
+      ],
+      "size": [
+        343.0399609374999,
+        468.0801074218748
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "camera_info",
+          "shape": 7,
+          "type": "LOAD3D_CAMERA",
+          "link": null
+        },
+        {
+          "name": "bg_image",
+          "shape": 7,
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "model_file",
+          "type": "STRING",
+          "widget": {
+            "name": "model_file"
+          },
+          "link": 6
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "Preview3D",
+        "Last Time Model File": "ultrashape_output/refined_20260107_150134302_19218e6b.glb",
+        "Scene Config": {
+          "showGrid": true,
+          "backgroundColor": "#282828",
+          "backgroundImage": "",
+          "backgroundRenderMode": "tiled"
+        },
+        "Camera Config": {
+          "cameraType": "perspective",
+          "fov": 35,
+          "state": {
+            "position": {
+              "x": 0.02516393745525375,
+              "y": 2.6994638480075253,
+              "z": 4.424720000809401
+            },
+            "target": {
+              "x": 0.18859298748879735,
+              "y": 2.7917143359345347,
+              "z": 0.03886594941979638
+            },
+            "zoom": 1,
+            "cameraType": "perspective"
+          }
+        },
+        "Light Config": {
+          "intensity": 3
+        }
+      },
+      "widgets_values": [
+        "ultrashape_output/refined_20260107_150134302_19218e6b.glb",
+        ""
+      ]
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "ULTRASHAPE_MODEL"
+    ],
+    [
+      2,
+      3,
+      0,
+      2,
+      1,
+      "ULTRASHAPE_MESH"
+    ],
+    [
+      3,
+      1,
+      0,
+      3,
+      0,
+      "ULTRASHAPE_MODEL"
+    ],
+    [
+      4,
+      2,
+      0,
+      4,
+      0,
+      "ULTRASHAPE_OUTPUT"
+    ],
+    [
+      6,
+      4,
+      0,
+      6,
+      2,
+      "STRING"
+    ],
+    [
+      7,
+      7,
+      0,
+      2,
+      2,
+      "IMAGE"
+    ],
+    [
+      8,
+      8,
+      2,
+      3,
+      1,
+      "STRING"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "workflowRendererVersion": "LG",
+    "ds": {
+      "scale": 0.892857142857143,
+      "offset": [
+        5922.848392350629,
+        3761.9234901354966
+      ]
+    },
+    "frontendVersion": "1.37.5",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}

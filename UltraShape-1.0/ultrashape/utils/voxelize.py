@@ -22,15 +22,44 @@ def voxelize_from_point(pc, num_latents, resolution=128):
 
     counts = torch.bincount(shuffled_batch_ids, minlength=B)
     min_count = counts.min().item()
-    actual_k = min(num_latents, min_count)
 
-    if actual_k < num_latents:
-        print(f"[Info] Voxel count ({min_count}) < Target ({num_latents}). Padding with repeated samples.")
+    # Always aim for num_latents
+    actual_k = num_latents
 
-    batch_starts = torch.searchsorted(shuffled_batch_ids, torch.arange(B, device=device))
-    offsets = torch.arange(actual_k, device=device).unsqueeze(0)
-    gather_indices = batch_starts.unsqueeze(1) + offsets
-    gather_indices = gather_indices.view(-1)
+    if min_count < num_latents:
+        print(f"[Info] Voxel count ({min_count}) < Target ({num_latents}). Sampling with replacement.")
+        # If we don't have enough unique voxels, we need to sample with replacement/repetition
+        # We can just repeat the indices to fill the gap
+
+        batch_starts = torch.searchsorted(shuffled_batch_ids, torch.arange(B, device=device))
+
+        # Create gathering indices that wrap around for each batch
+        # For each batch element i, we want actual_k indices
+        # They start at batch_starts[i] and go up to batch_starts[i] + counts[i]
+        # We use modulo to wrap around: (j % counts[i]) + batch_starts[i]
+
+        # Expand for broadcasting
+        batch_starts_exp = batch_starts.unsqueeze(1) # [B, 1]
+        counts_exp = counts.unsqueeze(1) # [B, 1]
+
+        offsets = torch.arange(actual_k, device=device).unsqueeze(0) # [1, K]
+
+        # Calculate offsets modulo the available count for each batch
+        # This effectively repeats the available voxels to fill the desired size
+        # We need to be careful about division by zero if a batch has 0 voxels (shouldn't happen with valid PC)
+        counts_exp = torch.maximum(counts_exp, torch.tensor(1, device=device))
+
+        wrapped_offsets = offsets % counts_exp
+        gather_indices = batch_starts_exp + wrapped_offsets
+        gather_indices = gather_indices.view(-1)
+
+    else:
+        # Standard case: enough points, just take the first k
+        batch_starts = torch.searchsorted(shuffled_batch_ids, torch.arange(B, device=device))
+        offsets = torch.arange(actual_k, device=device).unsqueeze(0)
+        gather_indices = batch_starts.unsqueeze(1) + offsets
+        gather_indices = gather_indices.view(-1)
+
     selected_indices = shuffled_voxels[gather_indices]
 
     final_grid_coords = selected_indices[:, 1:]
@@ -41,15 +70,5 @@ def voxelize_from_point(pc, num_latents, resolution=128):
 
     sampled_pc = final_centers.view(B, actual_k, 3)
     sampled_indices = final_grid_coords.view(B, actual_k, 3)
-
-    # Pad to num_latents if we have fewer voxels than expected
-    if actual_k < num_latents:
-        pad_size = num_latents - actual_k
-        # Repeat existing samples to fill the gap
-        repeat_indices = torch.randint(0, actual_k, (B, pad_size), device=device)
-        pad_pc = torch.gather(sampled_pc, 1, repeat_indices.unsqueeze(-1).expand(-1, -1, 3))
-        pad_indices = torch.gather(sampled_indices, 1, repeat_indices.unsqueeze(-1).expand(-1, -1, 3))
-        sampled_pc = torch.cat([sampled_pc, pad_pc], dim=1)
-        sampled_indices = torch.cat([sampled_indices, pad_indices], dim=1)
 
     return sampled_pc, sampled_indices

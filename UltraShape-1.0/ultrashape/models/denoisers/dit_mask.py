@@ -578,10 +578,12 @@ class RefineDiT(nn.Module):
         num_moe_layers: int = 6,
         num_experts: int = 8,
         moe_top_k: int = 2,
+        voxel_query_res: int = 128,
         **kwargs
     ):
         super().__init__()
         self.input_size = input_size
+        self.voxel_query_res = voxel_query_res
         self.depth = depth
         self.in_channels = in_channels
         self.out_channels = in_channels
@@ -636,7 +638,8 @@ class RefineDiT(nn.Module):
         cond_sin = torch.zeros(x.shape[0], num_cond_tokens, head_dim, device=device)
 
         voxel_cond = kwargs.get('voxel_cond')
-        rotary_cos_vox, rotary_sin_vox = precompute_freqs_cis_3d(head_dim, voxel_cond)
+        rotary_cos_vox, rotary_sin_vox = precompute_freqs_cis_3d_interpolated(
+            head_dim, voxel_cond, current_res=self.voxel_query_res)
 
         rotary_cos = torch.cat([cond_cos, rotary_cos_vox], dim=1)
         rotary_sin = torch.cat([cond_sin, rotary_sin_vox], dim=1)
@@ -694,5 +697,51 @@ def precompute_freqs_cis_3d(dim: int, grid_indices: torch.Tensor, theta: float =
 
     args = torch.cat([args_x, args_y, args_z], dim=-1)
     args = torch.cat([args, args], dim=-1)
-    
+
+    return torch.cos(args), torch.sin(args)
+
+
+def precompute_freqs_cis_3d_interpolated(
+    dim: int,
+    grid_indices: torch.Tensor,
+    theta: float = 10000.0,
+    trained_res: float = 128.0,  # training resolution
+    current_res: float = 256.0,  # inference resolution
+):
+    scale_factor = current_res / trained_res
+
+    dim_x = dim // 3
+    dim_y = dim // 3
+    dim_z = dim - dim_x - dim_y
+
+    device = grid_indices.device
+
+    freqs_x = 1.0 / (theta ** (torch.arange(0, dim_x, 2, device=device).float() / dim_x))
+    freqs_y = 1.0 / (theta ** (torch.arange(0, dim_y, 2, device=device).float() / dim_y))
+    freqs_z = 1.0 / (theta ** (torch.arange(0, dim_z, 2, device=device).float() / dim_z))
+
+    num_freqs_x = dim_x // 2 + (dim_x % 2)
+    num_freqs_y = dim_y // 2 + (dim_y % 2)
+    target_len = dim // 2
+    freqs_x = freqs_x[:num_freqs_x]
+    freqs_y = freqs_y[:num_freqs_y]
+    freqs_z = freqs_z[:(target_len - len(freqs_x) - len(freqs_y))]
+
+    input_x = grid_indices[..., 0].float()
+    input_y = grid_indices[..., 1].float()
+    input_z = grid_indices[..., 2].float()
+
+    # Apply Scaling
+    pos_x = input_x / scale_factor
+    pos_y = input_y / scale_factor
+    pos_z = input_z / scale_factor
+
+    # pos * freq
+    args_x = pos_x.unsqueeze(-1) * freqs_x.unsqueeze(0).unsqueeze(0)
+    args_y = pos_y.unsqueeze(-1) * freqs_y.unsqueeze(0).unsqueeze(0)
+    args_z = pos_z.unsqueeze(-1) * freqs_z.unsqueeze(0).unsqueeze(0)
+
+    args = torch.cat([args_x, args_y, args_z], dim=-1)
+    args = torch.cat([args, args], dim=-1)
+
     return torch.cos(args), torch.sin(args)

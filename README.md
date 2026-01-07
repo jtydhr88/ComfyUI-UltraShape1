@@ -7,8 +7,10 @@ A ComfyUI plugin based on [UltraShape 1.0](https://github.com/PKU-YuanGroup/Ultr
 - **Mesh Refinement**: Refine coarse 3D meshes using image guidance
 - **High-Quality Output**: Generate detailed meshes with sharp edges
 - **Multiple Export Formats**: Export to GLB, OBJ, PLY, STL formats
-- **Flexible Input**: Load meshes from file picker or path string
+- **Flexible Input**: Load meshes via file upload, path string, or output from other nodes
 - **Configurable Resolution**: Adjust output resolution based on available VRAM
+- **Low VRAM Mode**: Offload model components to CPU when not in use
+- **Chunk Processing**: Reduce memory usage during refinement with configurable chunk size
 
 ## Installation
 
@@ -52,25 +54,34 @@ Load UltraShape refinement model (VAE + DiT + Conditioner).
 | checkpoint | Select checkpoint file from `models/UltraShape/` |
 | config | Config file (default: `infer_dit_refine.yaml`) |
 | dtype | Model precision: `float16` / `bfloat16` / `float32` |
+| low_vram | Enable low VRAM mode - offload model components to CPU when not in use |
+
+### UltraShape Mesh Selector
+File upload widget for selecting mesh files.
+
+| Parameter | Description |
+|-----------|-------------|
+| mesh | File upload widget - click to upload mesh file |
+
+**Supported formats**: GLB, GLTF, OBJ, PLY, STL
 
 ### UltraShape Load Coarse Mesh
-Load and preprocess coarse mesh for refinement (file picker).
+Load and preprocess coarse mesh for refinement.
 
 | Parameter | Description |
 |-----------|-------------|
 | model | Model from Load Model node |
-| mesh_file | Select mesh file from dropdown |
+| mesh_path | Path to mesh file (supports multiple formats - see below) |
 | normalize_scale | Mesh normalization scale (default: 0.99) |
 | num_sharp_points | Number of sharp edge sample points |
 | num_uniform_points | Number of uniform sample points |
+| num_latents | Number of latent tokens (default: 768, higher = more detail) |
 
-### UltraShape Load Coarse Mesh (Path)
-Load coarse mesh from file path string.
-
-| Parameter | Description |
-|-----------|-------------|
-| model | Model from Load Model node |
-| mesh_path | Full path to mesh file |
+**Mesh Path Formats**:
+- **Absolute path**: `C:\path\to\mesh.glb` or `/path/to/mesh.glb`
+- **Relative to input**: `input/mesh.glb` or just `mesh.glb` (auto-searches in input folder)
+- **Relative to output**: `output/mesh.glb`
+- **From UltraShape Mesh Selector**: Connect the output directly
 
 ### UltraShape Refine
 Core refinement node - refine coarse mesh using image guidance.
@@ -87,8 +98,14 @@ Core refinement node - refine coarse mesh using image guidance.
 | box_v | Bounding box scale (default: 1.0) |
 | seed | Random seed |
 | remove_bg | Remove image background before processing |
+| num_chunks | Number of chunks for processing (default: 1, higher = less VRAM) |
 
-**VRAM Note for `octree_resolution`**:
+**VRAM Optimization Tips**:
+- Increase `num_chunks` to reduce VRAM usage during refinement
+- Enable `low_vram` in Load Model node
+- Reduce `octree_resolution`
+
+**VRAM Estimates for `octree_resolution`**:
 | Resolution | Approx. VRAM |
 |------------|--------------|
 | 384 | ~8GB |
@@ -106,18 +123,31 @@ Save refined mesh to file.
 | filename_prefix | Output filename prefix |
 | file_format | Export format: `glb` / `obj` / `ply` / `stl` |
 
-## Example Workflow
+## Example Workflows
 
+### Basic Workflow
 ```
-[Load Image] ──────────────────────────────────────┐
-                                                   │
-[UltraShape Load Model] ──┬──> [UltraShape Load Coarse Mesh] ──┴──> [UltraShape Refine] ──> [UltraShape Save GLB/OBJ]
+[Load Image] ──────────────────────────────────────────────────────────┐
+                                                                       │
+[UltraShape Load Model] ──┬──> [UltraShape Load Coarse Mesh] ──────────┴──> [UltraShape Refine] ──> [UltraShape Save GLB/OBJ]
+                          │              ↑
+                          │    [UltraShape Mesh Selector] (file upload)
 ```
+
+### With File Upload
+```
+[UltraShape Mesh Selector] ──> mesh_path ──> [UltraShape Load Coarse Mesh]
+```
+
+### Low VRAM Workflow
+1. Enable `low_vram` in **UltraShape Load Model**
+2. Set `num_chunks` to 2-4 in **UltraShape Refine**
+3. Reduce `octree_resolution` to 384 or lower
 
 ## Notes
 
 1. **VRAM Requirements**:
-   - Model loading: ~8-12GB VRAM
+   - Model loading: ~8-12GB VRAM (less with low_vram mode)
    - Refinement (octree_resolution=384): ~8GB additional
    - Refinement (octree_resolution=512): ~16GB additional
    - Total recommended: 16GB+ for default settings, 32GB+ for high resolution
@@ -139,6 +169,8 @@ Save refined mesh to file.
 ## Troubleshooting
 
 ### Out of Memory (OOM)
+- Enable `low_vram` in Load Model node
+- Increase `num_chunks` in Refine node (try 2-4)
 - Reduce `octree_resolution` (try 384 or 256)
 - Use `bfloat16` or `float16` dtype
 - Close other GPU applications
@@ -151,6 +183,26 @@ Save refined mesh to file.
 - `cubvh`: Optional, will use slower CPU marching cubes
 - `flash_attn`: Optional, will use PyTorch SDPA
 - `pymeshlab`: Optional, mesh post-processing will be skipped
+
+### Mesh File Not Found
+- Check the path format (absolute or relative to input/output folder)
+- Ensure the file exists and has a supported extension
+- Try using UltraShape Mesh Selector for file upload
+
+## Changelog
+
+### v1.1.0
+- Added `low_vram` parameter for reduced memory usage
+- Added `num_latents` parameter for configurable detail level
+- Added `num_chunks` parameter for chunk-based processing
+- Added **UltraShape Mesh Selector** node for file upload
+- Refactored mesh loading with flexible path resolution
+- Merged performance optimizations from upstream UltraShape
+- Fixed device mismatch issues with CUDA generators
+- Improved memory management with chunk processing
+
+### v1.0.0
+- Initial release
 
 ## License
 

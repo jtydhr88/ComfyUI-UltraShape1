@@ -319,9 +319,9 @@ def process_single_mesh(
     mesh_path: str,
     output_dir: str,
     data_type:str = 'mesh',
-    surface_uniform_samples: int = 100000,      # surface上均匀采样点数
-    surface_curvature_samples: int = 200000,    # surface上曲率采样点数
-    space_samples: int = 300000,               # 空间中采样点数
+    surface_uniform_samples: int = 100000,
+    surface_curvature_samples: int = 200000,
+    space_samples: int = 300000,
     noise_sigma: float = 0.01,
     device: str = "cuda"
 ) -> None:

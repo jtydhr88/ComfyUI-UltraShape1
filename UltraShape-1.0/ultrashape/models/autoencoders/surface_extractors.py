@@ -124,38 +124,72 @@ def get_sparse_valid_voxels(grid_logit: torch.Tensor):
     N = grid_logit.shape[0]
     device = grid_logit.device
 
-    nan_mask = torch.isnan(grid_logit)
+    # Chunk processing to save memory
+    chunk_size = 128
 
-    invalid_voxel_mask = (
-        nan_mask[:-1, :-1, :-1] |
-        nan_mask[1:, :-1, :-1]  |
-        nan_mask[:-1, 1:, :-1]  |
-        nan_mask[:-1, :-1, 1:]  |
-        nan_mask[1:, 1:, :-1]   |
-        nan_mask[1:, :-1, 1:]   |
-        nan_mask[:-1, 1:, 1:]   |
-        nan_mask[1:, 1:, 1:]
-    )
-    
-    valid_voxel_mask = ~invalid_voxel_mask
+    all_sparse_coords = []
+    all_sparse_logits = []
 
-    sparse_coords = valid_voxel_mask.nonzero(as_tuple=False)
+    # Process in chunks along x-axis
+    for start_x in range(0, N - 1, chunk_size):
+        end_x = min(start_x + chunk_size, N - 1)
 
-    if sparse_coords.shape[0] == 0:
+        # Determine slice range including +1 for neighbor checks
+        slice_end = end_x + 1
+
+        chunk = grid_logit[start_x:slice_end, :, :]
+        nan_mask = torch.isnan(chunk)
+
+        sub_nan_mask = nan_mask
+
+        # Validity check requires looking at i and i+1
+        # Invalid if ANY corner is NaN
+        invalid_voxel_mask = (
+            sub_nan_mask[:-1, :-1, :-1] |
+            sub_nan_mask[1:, :-1, :-1]  |
+            sub_nan_mask[:-1, 1:, :-1]  |
+            sub_nan_mask[:-1, :-1, 1:]  |
+            sub_nan_mask[:-1, 1:, 1:]   |
+            sub_nan_mask[1:, :-1, 1:]   |
+            sub_nan_mask[1:, 1:, :-1]   |
+            sub_nan_mask[1:, 1:, 1:]
+        )
+
+        valid_voxel_mask = ~invalid_voxel_mask
+
+        # Get local coordinates
+        local_coords = valid_voxel_mask.nonzero(as_tuple=False)
+
+        if local_coords.shape[0] > 0:
+            lx, ly, lz = local_coords[:, 0], local_coords[:, 1], local_coords[:, 2]
+
+            # Extract logits using local indices on the chunk
+            sparse_vertex_logits = torch.stack([
+                chunk[lx,     ly,     lz],     # v0
+                chunk[lx + 1, ly,     lz],     # v1
+                chunk[lx + 1, ly + 1, lz],     # v2
+                chunk[lx,     ly + 1, lz],     # v3
+                chunk[lx,     ly,     lz + 1], # v4
+                chunk[lx + 1, ly,     lz + 1], # v5
+                chunk[lx + 1, ly + 1, lz + 1], # v6
+                chunk[lx,     ly + 1, lz + 1]  # v7
+            ], dim=1)
+
+            # Convert local coords to global coords
+            global_coords = local_coords.clone()
+            global_coords[:, 0] += start_x
+
+            all_sparse_coords.append(global_coords)
+            all_sparse_logits.append(sparse_vertex_logits)
+
+        # Free memory
+        del chunk, nan_mask, invalid_voxel_mask, valid_voxel_mask, local_coords
+
+    if not all_sparse_coords:
         return torch.empty((0, 3), dtype=torch.long, device=device), torch.empty((0, 8), dtype=grid_logit.dtype, device=device)
 
-    x, y, z = sparse_coords[:, 0], sparse_coords[:, 1], sparse_coords[:, 2]
-
-    sparse_vertex_logits = torch.stack([
-        grid_logit[x,     y,     z],     # v0
-        grid_logit[x + 1, y,     z],     # v1
-        grid_logit[x + 1, y + 1, z],     # v2
-        grid_logit[x,     y + 1, z],     # v3
-        grid_logit[x,     y,     z + 1], # v4
-        grid_logit[x + 1, y,     z + 1], # v5
-        grid_logit[x + 1, y + 1, z + 1], # v6
-        grid_logit[x,     y + 1, z + 1]  # v7
-    ], dim=1)
+    sparse_coords = torch.cat(all_sparse_coords, dim=0)
+    sparse_vertex_logits = torch.cat(all_sparse_logits, dim=0)
 
     return sparse_coords, sparse_vertex_logits
 
@@ -179,16 +213,17 @@ class MCSurfaceExtractor(SurfaceExtractor):
                 - faces (np.ndarray): Extracted mesh faces (triangles).
         """
 
-        grid_logit = grid_logit.detach().float()
+        grid_logit = grid_logit.detach()
 
         if HAS_CUBVH:
             # Use CUDA-accelerated sparse marching cubes
             sparse_coords, sparse_logits = get_sparse_valid_voxels(grid_logit)
-            vertices, faces = cubvh.sparse_marching_cubes(sparse_coords, sparse_logits, mc_level)
+            # Convert to float32 only for the sparse set
+            vertices, faces = cubvh.sparse_marching_cubes(sparse_coords, sparse_logits.float(), mc_level)
             vertices, faces = vertices.cpu().numpy(), faces.cpu().numpy()
         else:
             # Fallback to skimage marching cubes (CPU, slower)
-            grid_np = grid_logit.cpu().numpy()
+            grid_np = grid_logit.float().cpu().numpy()
             vertices, faces, normals, _ = measure.marching_cubes(
                 grid_np, mc_level, method="lewiner", mask=(~np.isnan(grid_np)))
 

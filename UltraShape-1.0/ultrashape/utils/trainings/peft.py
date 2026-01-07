@@ -35,7 +35,6 @@ class PeftSaveCallback(Callback):
         elif isinstance(obj, list):
             return [self.recursive_convert(i) for i in obj]
         elif isinstance(obj, type):
-            # 避免修改类对象
             return obj
         elif hasattr(obj, '__dict__'):
             for attr_name, attr_value in vars(obj).items():

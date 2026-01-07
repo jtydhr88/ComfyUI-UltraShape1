@@ -252,6 +252,17 @@ class DiTPipeline:
         self.conditioner = conditioner
         self.image_processor = image_processor
         self.kwargs = kwargs
+
+        self.components = {
+            "vae": vae,
+            "model": model,
+            "scheduler": scheduler,
+            "conditioner": conditioner,
+            "image_processor": image_processor,
+        }
+        if ref_model is not None:
+             self.components["ref_model"] = ref_model
+
         self.to(device, dtype)
 
     def compile(self):
@@ -456,8 +467,11 @@ class DiTPipeline:
             extra_step_kwargs["generator"] = generator
         return extra_step_kwargs
 
-    def prepare_latents(self, batch_size, dtype, device, generator, latents=None):
-        shape = (batch_size, *self.vae.latent_shape)
+    def prepare_latents(self, batch_size, dtype, device, generator, latents=None, shape=None):
+        if shape is None:
+            shape = (batch_size, *self.vae.latent_shape)
+        else:
+            shape = (batch_size, *shape)
         if isinstance(generator, list) and len(generator) != batch_size:
             raise ValueError(
                 f"You have passed a list of generators of length {len(generator)}, but requested an effective batch"
@@ -465,7 +479,17 @@ class DiTPipeline:
             )
 
         if latents is None:
-            latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
+            # Handle device mismatch between generator and target device
+            gen_device = None
+            if generator is not None and hasattr(generator, 'device'):
+                gen_device = generator.device
+
+            if gen_device is not None and gen_device.type != torch.device(device).type:
+                # Generate on generator's device, then move to target device
+                latents = randn_tensor(shape, generator=generator, device=gen_device, dtype=dtype)
+                latents = latents.to(device)
+            else:
+                latents = randn_tensor(shape, generator=generator, device=device, dtype=dtype)
         else:
             latents = latents.to(device)
 
@@ -730,7 +754,14 @@ class UltraShapePipeline(DiTPipeline):
             device,
             sigmas=sigmas,
         )
-        latents = self.prepare_latents(batch_size, dtype, device, generator)
+        latents_shape = None
+        if voxel_cond is not None:
+             # voxel_cond: [B, N, 3] -> [N, 3] if batched? No, it's [B, N, 3] usually
+             # The encoder expects [B, N, 3]
+             num_tokens = voxel_cond.shape[1]
+             latents_shape = (num_tokens, self.vae.latent_shape[-1])
+
+        latents = self.prepare_latents(batch_size, dtype, device, generator, shape=latents_shape)
 
         guidance = None
         if hasattr(self.model, 'guidance_embed') and \
@@ -748,7 +779,7 @@ class UltraShapePipeline(DiTPipeline):
                     latent_model_input = latents
 
                 # NOTE: we assume model get timesteps ranged from 0 to 1
-                timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype)
+                timestep = t.expand(latent_model_input.shape[0]).to(latents.dtype).to(latent_model_input.device)
                 timestep = timestep / self.scheduler.config.num_train_timesteps
                 if voxel_cond is None:
                     noise_pred = self.model(latent_model_input, timestep, cond, guidance=guidance)
