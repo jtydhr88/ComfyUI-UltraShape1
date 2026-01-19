@@ -1,3 +1,4 @@
+import gc
 import os
 import sys
 import uuid
@@ -8,6 +9,7 @@ from typing import Optional, Dict, Any
 from PIL import Image
 
 import comfy.model_management as model_management
+from huggingface_hub import hf_hub_download
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 ULTRASHAPE_DIR = os.path.join(CURRENT_DIR, "UltraShape-1.0")
@@ -27,6 +29,29 @@ except ImportError:
     COMFY_INPUT_DIR = os.path.join(os.path.dirname(CURRENT_DIR), "input")
 
 ULTRASHAPE_MODELS_DIR = os.path.join(COMFY_MODELS_DIR, "UltraShape")
+
+# HuggingFace model info
+ULTRASHAPE_HF_REPO = "infinith/UltraShape"
+DEFAULT_CHECKPOINT = "ultrashape_v1.pt"
+
+
+def ensure_ultrashape_checkpoint():
+    """Download default checkpoint from HuggingFace if not present."""
+    os.makedirs(ULTRASHAPE_MODELS_DIR, exist_ok=True)
+    ckpt_path = os.path.join(ULTRASHAPE_MODELS_DIR, DEFAULT_CHECKPOINT)
+
+    if not os.path.exists(ckpt_path):
+        print(f"[UltraShape] Checkpoint not found. Downloading {DEFAULT_CHECKPOINT} from HuggingFace...")
+        try:
+            hf_hub_download(
+                repo_id=ULTRASHAPE_HF_REPO,
+                filename=DEFAULT_CHECKPOINT,
+                local_dir=ULTRASHAPE_MODELS_DIR,
+                local_dir_use_symlinks=False
+            )
+            print(f"[UltraShape] Download complete: {ckpt_path}")
+        except Exception as e:
+            print(f"[UltraShape] Failed to download checkpoint: {e}")
 
 
 def get_timestamp():
@@ -76,11 +101,24 @@ class UltraShapeLoadModel:
     @classmethod
     def INPUT_TYPES(s):
         # Scan for checkpoint files
-        ckpt_files = ["(select file)"]
+        ckpt_files = []
         if os.path.exists(ULTRASHAPE_MODELS_DIR):
             for f in os.listdir(ULTRASHAPE_MODELS_DIR):
                 if f.endswith(".pt") or f.endswith(".ckpt") or f.endswith(".safetensors"):
                     ckpt_files.append(f)
+
+        # Auto-download if no checkpoints found
+        if not ckpt_files:
+            ensure_ultrashape_checkpoint()
+            # Re-scan after download
+            if os.path.exists(ULTRASHAPE_MODELS_DIR):
+                for f in os.listdir(ULTRASHAPE_MODELS_DIR):
+                    if f.endswith(".pt") or f.endswith(".ckpt") or f.endswith(".safetensors"):
+                        ckpt_files.append(f)
+
+        # Add placeholder if still empty
+        if not ckpt_files:
+            ckpt_files = ["(select file)"]
 
         # Scan for config files
         config_files = ["infer_dit_refine.yaml"]
@@ -90,9 +128,12 @@ class UltraShapeLoadModel:
                 if f.endswith(".yaml") and f not in config_files:
                     config_files.append(f)
 
+        # Set default to first real checkpoint if available
+        default_ckpt = ckpt_files[0] if ckpt_files and ckpt_files[0] != "(select file)" else "(select file)"
+
         return {
             "required": {
-                "checkpoint": (ckpt_files, {"default": "(select file)"}),
+                "checkpoint": (ckpt_files, {"default": default_ckpt}),
             },
             "optional": {
                 "config": (config_files, {"default": "infer_dit_refine.yaml"}),

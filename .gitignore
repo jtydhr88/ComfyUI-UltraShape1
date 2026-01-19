@@ -28,6 +28,7 @@ Thumbs.db
 __init__.cpython-311.pyc
 
 __pycache__
+.ipynb_checkpoints/
 
 UltraShape-1.0-src
 node.zip

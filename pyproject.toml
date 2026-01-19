@@ -5,17 +5,21 @@ description = "ComfyUI custom nodes for UltraShape - Image-guided 3D mesh refine
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.10"
-dependencies = [
-    "trimesh>=4.0.0",
-    "omegaconf>=2.3.0",
-    "einops>=0.8.0",
-]
+
+dynamic = ["dependencies"]
 
 [project.optional-dependencies]
 rembg = ["rembg"]
 
 [project.urls]
 Repository = "https://github.com/jtydhr88/ComfyUI-UltraShape1"
+
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
 
 [tool.comfy]
 PublisherId = "jtydhr88"
