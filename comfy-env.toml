@@ -1,3 +1,7 @@
+[node_reqs]
+ComfyUI-GeometryPack = "PozzettiAndrea/ComfyUI-GeometryPack"
+
+
 [ultrashape1]
 python = "3.10"
 cuda_version = "auto"

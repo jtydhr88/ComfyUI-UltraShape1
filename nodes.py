@@ -1,22 +1,12 @@
-import gc
 import os
-import sys
 import uuid
 import time
-import numpy as np
-import torch
 from typing import Optional, Dict, Any
-from PIL import Image
 
-import comfy.model_management as model_management
-from huggingface_hub import hf_hub_download
+from comfy_env import isolated
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 ULTRASHAPE_DIR = os.path.join(CURRENT_DIR, "UltraShape-1.0")
-
-# Add ultrashape to path
-if ULTRASHAPE_DIR not in sys.path:
-    sys.path.insert(0, ULTRASHAPE_DIR)
 
 try:
     import folder_paths
@@ -37,6 +27,8 @@ DEFAULT_CHECKPOINT = "ultrashape_v1.pt"
 
 def ensure_ultrashape_checkpoint():
     """Download default checkpoint from HuggingFace if not present."""
+    from huggingface_hub import hf_hub_download
+
     os.makedirs(ULTRASHAPE_MODELS_DIR, exist_ok=True)
     ckpt_path = os.path.join(ULTRASHAPE_MODELS_DIR, DEFAULT_CHECKPOINT)
 
@@ -88,6 +80,7 @@ class UltraShapeMeshWrapper:
 # Node 1: UltraShape Load Model
 # ============================================================================
 
+@isolated(env="ultrashape1", import_paths=[".", "UltraShape-1.0"])
 class UltraShapeLoadModel:
     """Load UltraShape refinement model (VAE + DiT + Conditioner)"""
 
@@ -151,6 +144,9 @@ class UltraShapeLoadModel:
         else:
             os.environ.pop("USE_SAGEATTN", None)
 
+        # Lazy imports inside isolated subprocess
+        import torch
+        import comfy.model_management as model_management
         from omegaconf import OmegaConf
         from ultrashape.pipelines import UltraShapePipeline
         from ultrashape.utils.misc import instantiate_from_config
@@ -240,6 +236,7 @@ class UltraShapeLoadModel:
 # Node 2: UltraShape Load Coarse Mesh
 # ============================================================================
 
+@isolated(env="ultrashape1", import_paths=[".", "UltraShape-1.0"])
 class UltraShapeLoadCoarseMesh:
     """Load and preprocess coarse mesh for refinement.
 
@@ -359,6 +356,7 @@ class UltraShapeLoadCoarseMesh:
 # Node 4: UltraShape Refine
 # ============================================================================
 
+@isolated(env="ultrashape1", import_paths=[".", "UltraShape-1.0"])
 class UltraShapeRefine:
     """Refine coarse mesh using image-guided diffusion"""
 
@@ -392,6 +390,11 @@ class UltraShapeRefine:
     def refine(self, model: UltraShapeModelWrapper, coarse_mesh: UltraShapeMeshWrapper,
                image, steps=50, guidance_scale=5.0, octree_resolution=1024, num_chunks=8000,
                mc_level=0.0, box_v=1.0, seed=42, remove_bg=False):
+        # Lazy imports inside isolated subprocess
+        import gc
+        import numpy as np
+        import torch
+        from PIL import Image
         import comfy.utils
 
         # Memory cleanup before inference
