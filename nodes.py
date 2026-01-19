@@ -84,13 +84,6 @@ class UltraShapeMeshWrapper:
         self.normalize_scale = normalize_scale
 
 
-class UltraShapeOutputWrapper:
-    """Wrapper for output mesh"""
-    def __init__(self, mesh, latents=None):
-        self.mesh = mesh  # trimesh.Trimesh object
-        self.latents = latents
-
-
 # ============================================================================
 # Node 1: UltraShape Load Model
 # ============================================================================
@@ -138,6 +131,8 @@ class UltraShapeLoadModel:
             "optional": {
                 "config": (config_files, {"default": "infer_dit_refine.yaml"}),
                 "dtype": (["float16", "bfloat16", "float32"], {"default": "bfloat16"}),
+                "attention_backend": (["sdpa", "sage_attn", "flash_attn"], {"default": "sdpa",
+                    "tooltip": "Attention backend: sdpa (default, always works), sage_attn (faster, needs sageattention), flash_attn (needs flash-attn)"}),
                 "low_vram": ("BOOLEAN", {"default": False,
                     "tooltip": "Enable CPU offloading to reduce VRAM usage (slower but uses less memory)"}),
             }
@@ -148,7 +143,14 @@ class UltraShapeLoadModel:
     FUNCTION = "load_model"
     CATEGORY = "UltraShape/Loaders"
 
-    def load_model(self, checkpoint, config="infer_dit_refine.yaml", dtype="bfloat16", low_vram=False):
+    def load_model(self, checkpoint, config="infer_dit_refine.yaml", dtype="bfloat16", attention_backend="sdpa", low_vram=False):
+        # Set attention backend environment variable BEFORE importing ultrashape
+        if attention_backend == "sage_attn":
+            os.environ["USE_SAGEATTN"] = "1"
+            print("[UltraShape] Using SageAttention backend")
+        else:
+            os.environ.pop("USE_SAGEATTN", None)
+
         from omegaconf import OmegaConf
         from ultrashape.pipelines import UltraShapePipeline
         from ultrashape.utils.misc import instantiate_from_config
@@ -382,8 +384,8 @@ class UltraShapeRefine:
             }
         }
 
-    RETURN_TYPES = ("ULTRASHAPE_OUTPUT",)
-    RETURN_NAMES = ("refined_mesh",)
+    RETURN_TYPES = ("TRIMESH",)
+    RETURN_NAMES = ("mesh",)
     FUNCTION = "refine"
     CATEGORY = "UltraShape"
 
@@ -391,6 +393,10 @@ class UltraShapeRefine:
                image, steps=50, guidance_scale=5.0, octree_resolution=1024, num_chunks=8000,
                mc_level=0.0, box_v=1.0, seed=42, remove_bg=False):
         import comfy.utils
+
+        # Memory cleanup before inference
+        gc.collect()
+        torch.cuda.empty_cache()
 
         # Convert ComfyUI image to PIL
         # ComfyUI image: (B, H, W, C) tensor, values 0-1
@@ -425,31 +431,31 @@ class UltraShapeRefine:
             pbar.update_absolute(step_count[0], steps)
 
         # Run diffusion refinement
-        with torch.autocast(device_type="cuda", dtype=model.dtype):
-            mesh, latents = model.pipeline(
-                image=pil_image,
-                voxel_cond=coarse_mesh.voxel_idx,
-                generator=generator,
-                box_v=box_v,
-                mc_level=mc_level,
-                octree_resolution=octree_resolution,
-                num_inference_steps=steps,
-                num_chunks=num_chunks,
-                guidance_scale=guidance_scale,
-                callback=callback,
-                callback_steps=1,
-            )
+        try:
+            with torch.autocast(device_type="cuda", dtype=model.dtype):
+                mesh, latents = model.pipeline(
+                    image=pil_image,
+                    voxel_cond=coarse_mesh.voxel_idx,
+                    generator=generator,
+                    box_v=box_v,
+                    mc_level=mc_level,
+                    octree_resolution=octree_resolution,
+                    num_inference_steps=steps,
+                    num_chunks=num_chunks,
+                    guidance_scale=guidance_scale,
+                    callback=callback,
+                    callback_steps=1,
+                )
 
-        # mesh is a list, get first element
-        output_mesh = mesh[0] if isinstance(mesh, list) else mesh
+            # mesh is a list, get first element
+            output_mesh = mesh[0] if isinstance(mesh, list) else mesh
 
-        wrapper = UltraShapeOutputWrapper(
-            mesh=output_mesh,
-            latents=latents
-        )
-
-        print(f"[UltraShape] Refinement complete: vertices={len(output_mesh.vertices)}, faces={len(output_mesh.faces)}")
-        return (wrapper,)
+            print(f"[UltraShape] Refinement complete: vertices={len(output_mesh.vertices)}, faces={len(output_mesh.faces)}")
+            return (output_mesh,)
+        finally:
+            # Memory cleanup after inference
+            gc.collect()
+            torch.cuda.empty_cache()
 
 
 # ============================================================================
@@ -537,7 +543,7 @@ class UltraShapeSaveGLB:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "refined_mesh": ("ULTRASHAPE_OUTPUT",),
+                "mesh": ("TRIMESH",),
             },
             "optional": {
                 "output_dir": ("STRING", {"default": "ultrashape_output"}),
@@ -552,7 +558,7 @@ class UltraShapeSaveGLB:
     CATEGORY = "UltraShape"
     OUTPUT_NODE = True
 
-    def save(self, refined_mesh: UltraShapeOutputWrapper, output_dir="ultrashape_output",
+    def save(self, mesh, output_dir="ultrashape_output",
              filename_prefix="refined", file_format="glb"):
         out_dir = os.path.join(COMFY_OUTPUT_DIR, output_dir)
         os.makedirs(out_dir, exist_ok=True)
@@ -562,8 +568,8 @@ class UltraShapeSaveGLB:
         filename = f"{filename_prefix}_{ts}_{uid}.{file_format}"
         save_path = os.path.join(out_dir, filename)
 
-        # Export mesh
-        refined_mesh.mesh.export(save_path)
+        # Export mesh (trimesh object)
+        mesh.export(save_path)
 
         print(f"[UltraShape] Saved: {save_path}")
 

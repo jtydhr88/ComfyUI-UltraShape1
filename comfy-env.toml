@@ -1,0 +1,25 @@
+[ultrashape1]
+python = "3.10"
+cuda_version = "auto"
+pytorch_version = "auto"
+
+    [ultrashape1.cuda]
+    cubvh = "*"
+    sageattention = "*"
+
+    [ultrashape1.packages]
+    requirements = [
+        "trimesh>=4.0.0",
+        "omegaconf>=2.3.0",
+        "einops>=0.8.0",
+        "pymeshlab",
+        "timm",
+        "accelerate>=0.17.0",
+        "diffusers",
+        "pytorch-lightning",
+        "rembg",
+        "huggingface_hub",
+        "scikit-image",
+        "opencv-python-headless",
+        "onnxruntime",
+    ]
