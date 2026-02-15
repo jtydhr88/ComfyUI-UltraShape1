@@ -5,9 +5,11 @@ import time
 import numpy as np
 import torch
 from typing import Optional, Dict, Any
+from io import BytesIO
 from PIL import Image
 
 import comfy.model_management as model_management
+from comfy_api.latest import Types
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 ULTRASHAPE_DIR = os.path.join(CURRENT_DIR, "UltraShape-1.0")
@@ -532,6 +534,32 @@ class UltraShapeSaveGLB:
 
 
 # ============================================================================
+# Node 7: UltraShape Convert To GLB
+# ============================================================================
+
+class UltraShapeConvertToGLB:
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "refined_mesh": ("ULTRASHAPE_OUTPUT",),
+                "file_format": (["glb", "obj", "stl"], {"default": "glb"}),
+            },
+        }
+
+    RETURN_TYPES = ("FILE_3D",)
+    RETURN_NAMES = ("mesh",)
+    FUNCTION = "execute"
+    CATEGORY = "UltraShape"
+
+    def execute(self, refined_mesh: UltraShapeOutputWrapper, file_format: str):
+        buf = BytesIO()
+        refined_mesh.mesh.export(buf, file_type=file_format)
+        return (Types.File3D(buf, file_format=file_format),)
+
+
+# ============================================================================
 # Node Registration
 # ============================================================================
 
@@ -541,6 +569,7 @@ NODE_CLASS_MAPPINGS = {
     "UltraShapeLoadCoarseMesh": UltraShapeLoadCoarseMesh,
     "UltraShapeRefine": UltraShapeRefine,
     "UltraShapeSaveGLB": UltraShapeSaveGLB,
+    "UltraShapeConvertToGLB": UltraShapeConvertToGLB,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -549,4 +578,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "UltraShapeLoadCoarseMesh": "UltraShape Load Coarse Mesh",
     "UltraShapeRefine": "UltraShape Refine",
     "UltraShapeSaveGLB": "UltraShape Save GLB/OBJ",
+    "UltraShapeConvertToGLB": "UltraShape Convert To GLB/OBJ",
 }
