@@ -560,6 +560,189 @@ class UltraShapeConvertToGLB:
 
 
 # ============================================================================
+# Node: UltraShape Load Coarse Mesh From Trimesh
+# ============================================================================
+
+class UltraShapeLoadCoarseMeshFromTrimesh:
+    """Load and preprocess a TRIMESH object for refinement — no file I/O needed.
+
+    Accepts a TRIMESH object directly (e.g. from Trellis2 nodes) and converts it
+    to ULTRASHAPE_MESH, bypassing any file path resolution entirely.
+    """
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "model": ("ULTRASHAPE_MODEL",),
+                "trimesh": ("TRIMESH",),
+            },
+            "optional": {
+                "normalize_scale": ("FLOAT", {"default": 0.99, "min": 0.5, "max": 1.0, "step": 0.01}),
+                "num_sharp_points": ("INT", {"default": 204800, "min": 10000, "max": 500000, "step": 10000}),
+                "num_uniform_points": ("INT", {"default": 204800, "min": 10000, "max": 500000, "step": 10000}),
+                "num_latents": ("INT", {"default": 0, "min": 0, "max": 131072, "step": 1024,
+                    "tooltip": "Number of latent tokens. 0=use config default (usually 32768). Higher=more detail but more VRAM"}),
+            }
+        }
+
+    RETURN_TYPES = ("ULTRASHAPE_MESH",)
+    RETURN_NAMES = ("coarse_mesh",)
+    FUNCTION = "load_from_trimesh"
+    CATEGORY = "UltraShape/Loaders"
+
+    def load_from_trimesh(self, model: UltraShapeModelWrapper, trimesh,
+                          normalize_scale=0.99, num_sharp_points=204800,
+                          num_uniform_points=204800, num_latents=0):
+        from ultrashape.surface_loaders import SharpEdgeSurfaceLoader
+        from ultrashape.utils import voxelize_from_point
+
+        print(f"[UltraShape] Loading coarse mesh from TRIMESH object "
+              f"(vertices={len(trimesh.vertices)}, faces={len(trimesh.faces)})")
+
+        loader = SharpEdgeSurfaceLoader(
+            num_sharp_points=num_sharp_points,
+            num_uniform_points=num_uniform_points,
+        )
+
+        # SharpEdgeSurfaceLoader accepts a trimesh.Trimesh directly (not just file paths)
+        surface = loader(trimesh, normalize_scale=normalize_scale)
+        surface = surface.to(model.device, dtype=model.dtype)
+
+        pc = surface[:, :, :3]  # [B, N, 3]
+
+        token_num = num_latents if num_latents > 0 else model.token_num
+        _, voxel_idx = voxelize_from_point(pc, token_num, resolution=model.voxel_res)
+
+        wrapper = UltraShapeMeshWrapper(
+            surface=surface,
+            voxel_idx=voxel_idx,
+            mesh_path=None,
+            normalize_scale=normalize_scale,
+        )
+
+        print(f"[UltraShape] Mesh loaded from TRIMESH: surface={surface.shape}, voxel_idx={voxel_idx.shape}")
+        return (wrapper,)
+
+
+# ============================================================================
+# Node: UltraShape Load Mesh (load file as TRIMESH)
+# ============================================================================
+
+class UltraShapeLoadMesh:
+    """Load a mesh file (.glb/.obj/.ply/.stl) as a TRIMESH object.
+
+    Outputs TRIMESH, which is compatible with Trellis2 nodes and can be fed
+    into UltraShape Load Coarse Mesh From Trimesh.
+    """
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "path": ("STRING", {"default": "input.glb",
+                    "tooltip": "Absolute path or path relative to ComfyUI root (e.g. input/mesh.glb)"}),
+            }
+        }
+
+    RETURN_TYPES = ("TRIMESH",)
+    RETURN_NAMES = ("mesh",)
+    FUNCTION = "load"
+    CATEGORY = "UltraShape/Loaders"
+
+    def load(self, path):
+        import trimesh as tm
+
+        # Resolve relative paths against ComfyUI root
+        if not os.path.isabs(path):
+            comfy_root = os.path.dirname(COMFY_OUTPUT_DIR)
+            resolved = os.path.normpath(os.path.join(comfy_root, path))
+        else:
+            resolved = path
+
+        if not os.path.exists(resolved):
+            raise FileNotFoundError(f"[UltraShape] Mesh file not found: {resolved}")
+
+        print(f"[UltraShape] Loading mesh from: {resolved}")
+        mesh = tm.load(resolved, force="mesh", merge_primitives=True)
+        return (mesh,)
+
+
+# ============================================================================
+# Node: UltraShape Save Mesh (save TRIMESH to file)
+# ============================================================================
+
+class UltraShapeSaveMesh:
+    """Save a TRIMESH object to a file in the output directory."""
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "mesh": ("TRIMESH",),
+            },
+            "optional": {
+                "output_dir": ("STRING", {"default": "ultrashape_output"}),
+                "filename_prefix": ("STRING", {"default": "mesh"}),
+                "file_format": (["glb", "obj", "ply", "stl"], {"default": "glb"}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("file_path",)
+    FUNCTION = "save"
+    CATEGORY = "UltraShape"
+    OUTPUT_NODE = True
+
+    def save(self, mesh, output_dir="ultrashape_output", filename_prefix="mesh", file_format="glb"):
+        out_dir = os.path.join(COMFY_OUTPUT_DIR, output_dir)
+        os.makedirs(out_dir, exist_ok=True)
+
+        ts = get_timestamp()
+        uid = str(uuid.uuid4())[:8]
+        filename = f"{filename_prefix}_{ts}_{uid}.{file_format}"
+        save_path = os.path.join(out_dir, filename)
+
+        mesh.export(save_path, file_type=file_format)
+        print(f"[UltraShape] Saved TRIMESH: {save_path}")
+
+        rel_path = os.path.relpath(save_path, COMFY_OUTPUT_DIR)
+        return (rel_path,)
+
+
+# ============================================================================
+# Node: UltraShape Output To Trimesh
+# ============================================================================
+
+class UltraShapeOutputToTrimesh:
+    """Convert ULTRASHAPE_OUTPUT to TRIMESH.
+
+    Allows the refined mesh from UltraShape Refine to flow into
+    Trellis2 nodes (e.g. Trellis2 - Export Mesh, Trellis2 - Simplify Trimesh)
+    or UltraShape Save Mesh.
+    """
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "refined_mesh": ("ULTRASHAPE_OUTPUT",),
+            }
+        }
+
+    RETURN_TYPES = ("TRIMESH",)
+    RETURN_NAMES = ("trimesh",)
+    FUNCTION = "convert"
+    CATEGORY = "UltraShape"
+
+    def convert(self, refined_mesh: UltraShapeOutputWrapper):
+        mesh = refined_mesh.mesh
+        print(f"[UltraShape] Converted ULTRASHAPE_OUTPUT to TRIMESH "
+              f"(vertices={len(mesh.vertices)}, faces={len(mesh.faces)})")
+        return (mesh,)
+
+
+# ============================================================================
 # Node Registration
 # ============================================================================
 
@@ -567,6 +750,10 @@ NODE_CLASS_MAPPINGS = {
     "UltraShapeLoadModel": UltraShapeLoadModel,
     "UltraShapeMeshSelector": UltraShapeMeshSelector,
     "UltraShapeLoadCoarseMesh": UltraShapeLoadCoarseMesh,
+    "UltraShapeLoadCoarseMeshFromTrimesh": UltraShapeLoadCoarseMeshFromTrimesh,
+    "UltraShapeLoadMesh": UltraShapeLoadMesh,
+    "UltraShapeSaveMesh": UltraShapeSaveMesh,
+    "UltraShapeOutputToTrimesh": UltraShapeOutputToTrimesh,
     "UltraShapeRefine": UltraShapeRefine,
     "UltraShapeSaveGLB": UltraShapeSaveGLB,
     "UltraShapeConvertToGLB": UltraShapeConvertToGLB,
@@ -576,6 +763,10 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "UltraShapeLoadModel": "UltraShape Load Model",
     "UltraShapeMeshSelector": "UltraShape Mesh Selector",
     "UltraShapeLoadCoarseMesh": "UltraShape Load Coarse Mesh",
+    "UltraShapeLoadCoarseMeshFromTrimesh": "UltraShape Load Coarse Mesh From Trimesh",
+    "UltraShapeLoadMesh": "UltraShape Load Mesh",
+    "UltraShapeSaveMesh": "UltraShape Save Mesh",
+    "UltraShapeOutputToTrimesh": "UltraShape Output To Trimesh",
     "UltraShapeRefine": "UltraShape Refine",
     "UltraShapeSaveGLB": "UltraShape Save GLB/OBJ",
     "UltraShapeConvertToGLB": "UltraShape Convert To GLB/OBJ",
